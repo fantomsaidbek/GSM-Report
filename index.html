@@ -24,6 +24,10 @@
         }
       }
     </script>
+    <script>
+      // Shim process for browser environment to prevent crashes in libraries that expect it
+      window.process = { env: { NODE_ENV: 'production' } };
+    </script>
     <style>
       body {
         background-color: var(--tg-theme-bg-color, #18181b);
