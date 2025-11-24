@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { FuelEntry, AppView } from './types';
 import { CameraInput } from './components/CameraInput';
 import { StatCard } from './components/StatCard';
-import { initGoogleAuth, requestAccessToken, uploadFileToDrive } from './services/googleDrive';
+import { initGoogleAuth, requestAccessToken, uploadFileToDrive, getClientId, setClientId } from './services/googleDrive';
 
 // Icons
 const ChartIcon = () => (
@@ -30,11 +30,19 @@ const CloudIcon = () => (
   </svg>
 );
 
+const CogIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+  </svg>
+);
+
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>(AppView.DASHBOARD);
   const [history, setHistory] = useState<FuelEntry[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Form State
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -45,11 +53,20 @@ const App: React.FC = () => {
   const [odometerImg, setOdometerImg] = useState<string | null>(null);
   const [receiptImg, setReceiptImg] = useState<string | null>(null);
 
-  // Initialize Google Auth
+  // Settings State
+  const [inputClientId, setInputClientId] = useState('');
+
+  // Initialize
   useEffect(() => {
-    initGoogleAuth((token) => {
-      if (token) setIsAuthenticated(true);
-    });
+    // Check if configured
+    const currentClientId = getClientId();
+    if (!currentClientId) {
+      setShowSettings(true);
+    } else {
+      initGoogleAuth((token) => {
+        if (token) setIsAuthenticated(true);
+      });
+    }
     
     // Load history
     const saved = localStorage.getItem('gsm_history');
@@ -68,6 +85,17 @@ const App: React.FC = () => {
       setTotal((l * p).toFixed(2));
     }
   }, [liters, price]);
+
+  const handleSaveSettings = () => {
+    if (!inputClientId.trim()) {
+      alert("Введите Client ID");
+      return;
+    }
+    setClientId(inputClientId);
+    setShowSettings(false);
+    // Reload to re-init auth cleanly
+    window.location.reload();
+  };
 
   const handleSave = async () => {
     if (!isAuthenticated) {
@@ -129,13 +157,45 @@ const App: React.FC = () => {
     if (history.length < 2) return { avgConsumption: 0, totalCost: history.reduce((acc, curr) => acc + curr.totalCost, 0) };
     const sorted = [...history].sort((a, b) => a.odometer - b.odometer);
     const dist = sorted[sorted.length - 1].odometer - sorted[0].odometer;
-    const totalLiters = sorted.reduce((acc, curr) => acc + curr.liters, 0); // Simplified logic
+    const totalLiters = sorted.reduce((acc, curr) => acc + curr.liters, 0);
     const totalCost = sorted.reduce((acc, curr) => acc + curr.totalCost, 0);
     const avg = dist > 0 ? (totalLiters / dist) * 100 : 0;
     return { avgConsumption: avg.toFixed(1), totalCost: totalCost.toFixed(0) };
   }, [history]);
 
   const stats = calculateStats();
+
+  const renderSettings = () => (
+    <div className="absolute inset-0 bg-black/90 z-50 flex items-center justify-center p-6 animate-fade-in">
+      <div className="bg-tg-secondaryBg p-6 rounded-xl w-full max-w-sm space-y-4 border border-white/10">
+        <h2 className="text-xl font-bold text-white mb-2">Настройка</h2>
+        <p className="text-sm text-tg-hint">
+          Для работы с Google Drive необходим <b>Client ID</b>.
+          <br/>
+          <a href="https://console.cloud.google.com/apis/credentials" target="_blank" className="text-tg-link underline">Получить в Google Cloud Console</a>
+        </p>
+        
+        <input 
+          type="text" 
+          placeholder="Введите Client ID (apps.googleusercontent.com)" 
+          value={inputClientId}
+          onChange={(e) => setInputClientId(e.target.value)}
+          className="w-full bg-tg-bg border border-white/10 rounded p-3 text-white text-sm outline-none focus:border-tg-link"
+        />
+
+        <div className="flex gap-2 pt-2">
+          <button onClick={handleSaveSettings} className="flex-1 bg-tg-button text-white py-3 rounded-lg font-medium">
+            Сохранить
+          </button>
+          {getClientId() && (
+             <button onClick={() => setShowSettings(false)} className="px-4 py-3 text-tg-hint">
+               Закрыть
+             </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 
   const renderDashboard = () => (
     <div className="space-y-6 animate-fade-in pb-24">
@@ -144,6 +204,9 @@ const App: React.FC = () => {
           <h1 className="text-2xl font-bold text-white">GSM Расход</h1>
           <p className="text-tg-hint text-sm">Статистика</p>
         </div>
+        <button onClick={() => { setInputClientId(getClientId() || ''); setShowSettings(true); }} className="text-tg-hint p-2 active:opacity-50">
+          <CogIcon />
+        </button>
       </header>
 
       <div className="grid grid-cols-2 gap-3">
@@ -271,6 +334,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen p-4 font-sans max-w-md mx-auto relative overflow-hidden">
       {view === AppView.DASHBOARD ? renderDashboard() : renderAddEntry()}
+      {showSettings && renderSettings()}
     </div>
   );
 };

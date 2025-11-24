@@ -1,23 +1,26 @@
 // Add declaration for google global variable
 declare const google: any;
 
-// CONFIGURATION
-// You must create a project in Google Cloud Console, enable Drive API,
-// and create an OAuth 2.0 Client ID for Web Application.
-// Add your domain (or localhost) to "Authorized JavaScript origins".
+const LS_KEY_CLIENT_ID = 'gsm_google_client_id';
 
-// Safely access process.env or fallback
-const getEnv = (key: string, defaultVal: string) => {
-  if (typeof process !== 'undefined' && process.env && process.env[key]) {
-    return process.env[key];
+// Helper to get the Client ID from LocalStorage or Env
+export const getClientId = (): string | null => {
+  // 1. Check LocalStorage (User entered value)
+  const stored = localStorage.getItem(LS_KEY_CLIENT_ID);
+  if (stored) return stored;
+
+  // 2. Check Environment Variable (Build time)
+  if (typeof process !== 'undefined' && process.env && process.env.GOOGLE_CLIENT_ID) {
+    return process.env.GOOGLE_CLIENT_ID;
   }
-  return defaultVal;
+
+  // 3. Return null if not configured
+  return null;
 };
 
-const CLIENT_ID = getEnv('GOOGLE_CLIENT_ID', 'YOUR_CLIENT_ID_HERE');
-// API Key is actually not strictly needed for the Implicit Flow (Token Client) if just uploading, 
-// but often used for Discovery. Identity Services mainly needs Client ID.
-const API_KEY = getEnv('GOOGLE_API_KEY', 'YOUR_API_KEY_HERE'); 
+export const setClientId = (id: string) => {
+  localStorage.setItem(LS_KEY_CLIENT_ID, id.trim());
+};
 
 const SCOPES = 'https://www.googleapis.com/auth/drive.file';
 
@@ -25,13 +28,20 @@ let tokenClient: any;
 let accessToken: string | null = null;
 
 export const initGoogleAuth = (callback: (token: string) => void) => {
+  const clientId = getClientId();
+  
+  if (!clientId) {
+    console.warn("Google Client ID is missing. Auth cannot be initialized.");
+    return;
+  }
+
   // Wait for Google Script to load
   const checkInterval = setInterval(() => {
     if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {
       clearInterval(checkInterval);
       try {
         tokenClient = google.accounts.oauth2.initTokenClient({
-          client_id: CLIENT_ID,
+          client_id: clientId,
           scope: SCOPES,
           callback: (tokenResponse: any) => {
             if (tokenResponse && tokenResponse.access_token) {
@@ -40,7 +50,7 @@ export const initGoogleAuth = (callback: (token: string) => void) => {
             }
           },
         });
-        console.log("Google Auth Initialized");
+        console.log("Google Auth Initialized with ID:", clientId.substring(0, 10) + "...");
       } catch (e) {
         console.error("Failed to initialize Google Auth Client", e);
       }
@@ -55,12 +65,18 @@ export const requestAccessToken = () => {
   if (tokenClient) {
     tokenClient.requestAccessToken();
   } else {
+    const clientId = getClientId();
+    if (!clientId) {
+      alert("Ошибка: Не настроен Google Client ID. Перейдите в настройки.");
+      return;
+    }
     console.error("Google Token Client not initialized. Waiting for script...");
-    // Attempt to init if script just loaded
     if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2 && !tokenClient) {
-       // Re-trigger init if needed, though initGoogleAuth should handle it.
-       // Just alert user to wait a moment.
-       alert("Инициализация Google сервисов... Попробуйте через секунду.");
+       // Try re-init immediately if script is there but init failed previously
+       initGoogleAuth(() => {}); 
+       alert("Инициализация... Нажмите кнопку еще раз через секунду.");
+    } else {
+       alert("Загрузка сервисов Google... Проверьте интернет.");
     }
   }
 };
