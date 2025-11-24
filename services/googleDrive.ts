@@ -9,12 +9,19 @@ export const getClientId = (): string | null => {
   const stored = localStorage.getItem(LS_KEY_CLIENT_ID);
   if (stored) return stored;
 
-  // 2. Check Environment Variable (Build time)
+  // 2. Check Environment Variable (Vite Build time)
+  // @ts-ignore
+  if (import.meta.env && import.meta.env.VITE_GOOGLE_CLIENT_ID) {
+    // @ts-ignore
+    return import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  }
+
+  // 3. Check Legacy Environment Variable (if any)
   if (typeof process !== 'undefined' && process.env && process.env.GOOGLE_CLIENT_ID) {
     return process.env.GOOGLE_CLIENT_ID;
   }
 
-  // 3. Return null if not configured
+  // 4. Return null if not configured
   return null;
 };
 
