@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { FuelEntry, AppView } from './types';
 import { CameraInput } from './components/CameraInput';
 import { StatCard } from './components/StatCard';
+import { getEntries, saveEntries, uploadImage } from './services/storage';
 
 // Icons
 const ChartIcon = () => (
@@ -32,6 +33,7 @@ const TrashIcon = () => (
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>(AppView.DASHBOARD);
   const [history, setHistory] = useState<FuelEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
   // Form State
@@ -43,15 +45,19 @@ const App: React.FC = () => {
   const [odometerImg, setOdometerImg] = useState<string | null>(null);
   const [receiptImg, setReceiptImg] = useState<string | null>(null);
 
-  // Initialize
+  // Initialize - Load from Vercel Blob
   useEffect(() => {
-    // Load history
-    const saved = localStorage.getItem('gsm_history');
-    if (saved) {
+    const loadData = async () => {
       try {
-        setHistory(JSON.parse(saved));
-      } catch (e) { console.error(e); }
-    }
+        const data = await getEntries();
+        setHistory(data);
+      } catch (e) {
+        console.error("Failed to load history:", e);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadData();
   }, []);
 
   // Auto-calculate total
@@ -63,11 +69,18 @@ const App: React.FC = () => {
     }
   }, [liters, price]);
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm("Вы уверены, что хотите удалить эту запись?")) {
-      const updated = history.filter(h => h.id !== id);
-      setHistory(updated);
-      localStorage.setItem('gsm_history', JSON.stringify(updated));
+      setIsLoading(true);
+      try {
+        const updated = history.filter(h => h.id !== id);
+        await saveEntries(updated);
+        setHistory(updated);
+      } catch (error) {
+        alert("Ошибка при удалении");
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -79,11 +92,18 @@ const App: React.FC = () => {
 
     setIsSaving(true);
     
-    // Simulate a small delay for better UX
-    await new Promise(resolve => setTimeout(resolve, 500));
-
     try {
       const timestamp = new Date().getTime();
+      let odoUrl: string | undefined = undefined;
+      let receiptUrl: string | undefined = undefined;
+
+      // Upload Images if they exist
+      if (odometerImg) {
+        odoUrl = await uploadImage(odometerImg, `odo_${timestamp}.jpg`);
+      }
+      if (receiptImg) {
+        receiptUrl = await uploadImage(receiptImg, `receipt_${timestamp}.jpg`);
+      }
 
       const newEntry: FuelEntry = {
         id: timestamp.toString(),
@@ -92,31 +112,24 @@ const App: React.FC = () => {
         liters: parseFloat(liters),
         pricePerLiter: parseFloat(price),
         totalCost: parseFloat(total),
-        odometerBase64: odometerImg || undefined,
-        receiptBase64: receiptImg || undefined
+        odometerUrl: odoUrl,
+        receiptUrl: receiptUrl
       };
 
       const updated = [newEntry, ...history];
       
-      try {
-        localStorage.setItem('gsm_history', JSON.stringify(updated));
-        setHistory(updated);
-        
-        // Reset form
-        setOdometer('');
-        setLiters('');
-        setPrice('');
-        setTotal('');
-        setOdometerImg(null);
-        setReceiptImg(null);
-        setView(AppView.DASHBOARD);
-      } catch (e: any) {
-        if (e.name === 'QuotaExceededError' || e.code === 22) {
-          alert("Ошибка: Недостаточно места в LocalStorage. Попробуйте удалить старые записи или уменьшить размер фото.");
-        } else {
-          alert(`Ошибка сохранения: ${e.message}`);
-        }
-      }
+      // Save updated database
+      await saveEntries(updated);
+      setHistory(updated);
+      
+      // Reset form
+      setOdometer('');
+      setLiters('');
+      setPrice('');
+      setTotal('');
+      setOdometerImg(null);
+      setReceiptImg(null);
+      setView(AppView.DASHBOARD);
 
     } catch (error: any) {
       alert(`Ошибка: ${error.message}`);
@@ -142,7 +155,7 @@ const App: React.FC = () => {
       <header className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white">GSM Расход</h1>
-          <p className="text-tg-hint text-sm">Локальное хранилище</p>
+          <p className="text-tg-hint text-sm">Vercel Blob Storage</p>
         </div>
       </header>
 
@@ -153,48 +166,58 @@ const App: React.FC = () => {
 
       <div>
         <h2 className="text-lg font-semibold mb-3 text-white">История</h2>
-        <div className="space-y-3">
-          {history.length === 0 ? (
-            <div className="text-center py-10 text-tg-hint border-2 border-dashed border-tg-secondaryBg rounded-xl">
-              Нет записей.
-            </div>
-          ) : (
-            history.map((entry) => (
-              <div key={entry.id} className="bg-tg-secondaryBg p-4 rounded-xl relative group">
-                <button 
-                  onClick={() => handleDelete(entry.id)} 
-                  className="absolute top-2 right-2 text-tg-hint opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-500 p-1"
-                >
-                  <TrashIcon />
-                </button>
-                <div className="flex justify-between items-center mb-2 pr-6">
-                  <div>
-                    <p className="font-bold text-white">{entry.date}</p>
-                    <p className="text-sm text-tg-hint">{entry.odometer} км</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-bold text-tg-link">{entry.totalCost} ₽</p>
-                    <p className="text-sm text-tg-hint">{entry.liters} л</p>
-                  </div>
-                </div>
-                <div className="flex gap-4 mt-3">
-                  {entry.odometerBase64 && (
-                    <div className="flex flex-col items-center">
-                      <span className="text-xs text-tg-hint mb-1">Пробег</span>
-                      <img src={entry.odometerBase64} alt="Odo" className="w-16 h-16 object-cover rounded border border-white/10" />
-                    </div>
-                  )}
-                  {entry.receiptBase64 && (
-                    <div className="flex flex-col items-center">
-                      <span className="text-xs text-tg-hint mb-1">Чек</span>
-                      <img src={entry.receiptBase64} alt="Check" className="w-16 h-16 object-cover rounded border border-white/10" />
-                    </div>
-                  )}
-                </div>
+        {isLoading ? (
+          <div className="flex justify-center py-10">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {history.length === 0 ? (
+              <div className="text-center py-10 text-tg-hint border-2 border-dashed border-tg-secondaryBg rounded-xl">
+                Нет записей.
               </div>
-            ))
-          )}
-        </div>
+            ) : (
+              history.map((entry) => (
+                <div key={entry.id} className="bg-tg-secondaryBg p-4 rounded-xl relative group">
+                  <button 
+                    onClick={() => handleDelete(entry.id)} 
+                    className="absolute top-2 right-2 text-tg-hint opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-500 p-1"
+                  >
+                    <TrashIcon />
+                  </button>
+                  <div className="flex justify-between items-center mb-2 pr-6">
+                    <div>
+                      <p className="font-bold text-white">{entry.date}</p>
+                      <p className="text-sm text-tg-hint">{entry.odometer} км</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold text-tg-link">{entry.totalCost} ₽</p>
+                      <p className="text-sm text-tg-hint">{entry.liters} л</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-4 mt-3">
+                    {entry.odometerUrl && (
+                      <div className="flex flex-col items-center">
+                        <span className="text-xs text-tg-hint mb-1">Пробег</span>
+                        <a href={entry.odometerUrl} target="_blank" rel="noopener noreferrer">
+                          <img src={entry.odometerUrl} alt="Odo" className="w-16 h-16 object-cover rounded border border-white/10" />
+                        </a>
+                      </div>
+                    )}
+                    {entry.receiptUrl && (
+                      <div className="flex flex-col items-center">
+                        <span className="text-xs text-tg-hint mb-1">Чек</span>
+                         <a href={entry.receiptUrl} target="_blank" rel="noopener noreferrer">
+                          <img src={entry.receiptUrl} alt="Check" className="w-16 h-16 object-cover rounded border border-white/10" />
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       <button
@@ -260,7 +283,12 @@ const App: React.FC = () => {
           disabled={isSaving}
           className="w-full py-4 bg-tg-button text-white font-bold rounded-xl active:scale-95 transition-transform disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2"
         >
-          {isSaving ? 'Сохранение...' : 'Сохранить'}
+          {isSaving ? (
+            <>
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+              <span>Загрузка...</span>
+            </>
+          ) : 'Сохранить'}
         </button>
         
         <button 

@@ -5,9 +5,9 @@ export interface FuelEntry {
   liters: number;
   pricePerLiter: number;
   totalCost: number;
-  // Base64 strings stored in LocalStorage
-  odometerBase64?: string;
-  receiptBase64?: string;
+  // URLs stored in Vercel Blob
+  odometerUrl?: string;
+  receiptUrl?: string;
 }
 
 export enum AppView {
