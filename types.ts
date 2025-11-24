@@ -5,9 +5,9 @@ export interface FuelEntry {
   liters: number;
   pricePerLiter: number;
   totalCost: number;
-  // URLs to Google Drive files
-  odometerImageLink?: string;
-  receiptImageLink?: string;
+  // Base64 strings stored in LocalStorage
+  odometerBase64?: string;
+  receiptBase64?: string;
 }
 
 export enum AppView {
