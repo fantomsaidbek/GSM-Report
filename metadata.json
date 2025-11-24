@@ -1,0 +1,7 @@
+{
+  "name": "GSM Расход",
+  "description": "Telegram Web App interface for tracking fuel consumption and costs using AI to scan odometer and receipts.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
